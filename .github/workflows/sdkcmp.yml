@@ -1,0 +1,45 @@
+name: SDK Compare
+
+on:
+  workflow_dispatch:
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --no-save @bitwarden/sdk-internal
+      - name: t
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+          WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
+          BASE_URL: https://warden-worker.tianhesl.workers.dev
+        run: |
+          cat > cmp.js <<'EOF'
+          const {PureCrypto}=require('@bitwarden/sdk-internal');
+          const crypto=require('crypto'),https=require('https'),qs=require('querystring');
+          const B=process.env.BASE_URL,E=process.env.WARDEN_EMAIL,P=process.env.WARDEN_MASTER_PASSWORD;
+          function describe(label,s){
+            const d=s.split('.');
+            const dm=d[1].split('|');
+            console.log(label,'type='+d[0],'dataB64len='+dm[0].length,'macB64len='+(dm[1]||'').length,'total='+s.length);
+          }
+          const uk=crypto.randomBytes(64);
+          const sdkEnc=PureCrypto.encrypt_user_key_with_master_password(Array.from(uk),P,E.toLowerCase(),{pBKDF2:{iterations:600000}});
+          describe('SDK',sdkEnc);
+          // manual (my register.js style)
+          const mKey=crypto.pbkdf2Sync(Buffer.from(P),Buffer.from(E.toLowerCase()),600000,32,'sha256');
+          function hkdf(prk,info,len){let t=Buffer.alloc(0),okm=Buffer.alloc(0);const n=Math.ceil(len/32);for(let i=1;i<=n;i++){t=crypto.createHmac('sha256',prk).update(Buffer.concat([t,Buffer.from(info),Buffer.from([i])])).digest();okm=Buffer.concat([okm,t]);}return okm.slice(0,len);}
+          const enc=hkdf(mKey,'enc',32),mac=hkdf(mKey,'mac',32);
+          const iv=crypto.randomBytes(16);const c=crypto.createCipheriv('aes-256-cbc',enc,iv);const ct=Buffer.concat([c.update(uk),c.final()]);
+          const macv=crypto.createHmac('sha256',mac).update(Buffer.concat([iv,ct])).digest();
+          const mine='2.'+Buffer.concat([iv,ct]).toString('base64')+'|'+macv.toString('base64');
+          describe('MINE',mine);
+          const kdf={pBKDF2:{iterations:600000}};
+          try{console.log('decrypt MINE with SDK len',PureCrypto.decrypt_user_key_with_master_password(mine,P,E.toLowerCase(),kdf).length);}catch(e){console.log('decrypt MINE ERR',e.message||e);}
+          EOF
+          node cmp.js 2>&1 | head -20
+
