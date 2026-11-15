@@ -1,0 +1,43 @@
+name: Capture bw Requests HTTPS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+        run: |
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/key.pem -out /tmp/cert.pem -days 1 -subj "/CN=127.0.0.1" >/dev/null 2>&1
+          cat > /tmp/echo.js <<'EOF'
+          const https = require('https');
+          const fs = require('fs');
+          https.createServer({key: fs.readFileSync('/tmp/key.pem'), cert: fs.readFileSync('/tmp/cert.pem')}, (req, res) => {
+            let body = '';
+            req.on('data', c => body += c);
+            req.on('end', () => {
+              console.log('REQ ' + req.method + ' ' + req.url + ' CT=' + (req.headers['content-type']||'') + ' BODY=' + body.slice(0,240));
+              const base = 'https://127.0.0.1:8799';
+              if (req.url.includes('prelogin')) {
+                res.writeHead(200, {'content-type':'application/json'});
+                res.end(JSON.stringify({kdf:0,kdfIterations:600000,kdfMemory:null,kdfParallelism:null}));
+              } else if (req.url.includes('config')) {
+                res.writeHead(200, {'content-type':'application/json'});
+                res.end(JSON.stringify({version:'2025.12.0',server:{name:'Vaultwarden',url:''},settings:{disableUserRegistration:true},environment:{vault:base,api:base+'/api',identity:base+'/identity',notifications:null},featureStates:{},object:'config'}));
+              } else {
+                res.writeHead(404, {'content-type':'application/json'});
+                res.end('{}');
+              }
+            });
+          }).listen(8799, '127.0.0.1', () => console.log('echo listening'));
+          EOF
+          node /tmp/echo.js & SERVER_PID=$!
+          sleep 1
+          npm install -g @bitwarden/cli >/dev/null 2>&1
+          bw config server https://127.0.0.1:8799 >/dev/null 2>&1
+          NODE_TLS_REJECT_UNAUTHORIZED=0 bw login "test@example.com" "SomePassword123" 2>&1 | head -8 || true
+          sleep 1
+          kill $SERVER_PID || true
