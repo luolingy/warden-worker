@@ -35,7 +35,7 @@ jobs:
       - name: Install worker-build and wasm-bindgen-cli
         run: |
           if ! command -v worker-build >/dev/null 2>&1; then
-            cargo install worker-build --locked || cargo install worker-build
+            cargo install worker-build --version 0.7.5 --locked || cargo install worker-build --version 0.7.5
           fi
           WASM_BINDGEN_VER=$(grep -m1 '^name = "wasm-bindgen"$' -A1 Cargo.lock | sed -n 's/version = "\(.*\)"/\1/p')
           echo "wasm-bindgen version in lock: $WASM_BINDGEN_VER"
