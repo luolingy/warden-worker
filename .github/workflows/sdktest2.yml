@@ -1,0 +1,42 @@
+name: SDK Decrypt Test2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --no-save @bitwarden/sdk-internal
+      - name: test
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+          WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
+          BASE_URL: https://warden-worker.tianhesl.workers.dev
+        run: |
+          cat > sdk2.js <<'EOF'
+          const crypto=require('crypto'),https=require('https'),qs=require('querystring');
+          const B=process.env.BASE_URL,E=process.env.WARDEN_EMAIL,P=process.env.WARDEN_MASTER_PASSWORD;
+          const mKey=crypto.pbkdf2Sync(Buffer.from(P),Buffer.from(E.toLowerCase()),600000,32,'sha256');
+          const mph=crypto.pbkdf2Sync(mKey,Buffer.from(P),1,32,'sha256').toString('base64');
+          const body=qs.stringify({grant_type:'password',username:E,password:mph,scope:'api offline_access',client_id:'web',deviceType:'10',deviceIdentifier:'d-'+crypto.randomUUID()});
+          const u=new URL(B+'/identity/connect/token');
+          const req=https.request({hostname:u.hostname,path:u.pathname,method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Content-Length':Buffer.byteLength(body)}},res=>{let d='';res.on('data',c=>d+=c);res.on('end',()=>{
+            const j=JSON.parse(d);const mpu=j.UserDecryptionOptions.MasterPasswordUnlock;
+            const {PureCrypto}=require('@bitwarden/sdk-internal');
+            try{
+              const out=PureCrypto.decrypt_user_key_with_master_password(mpu.MasterKeyWrappedUserKey,P,mpu.Salt,{pBKDF2:{iterations:600000}});
+              console.log('SDK DECRYPT OK userKey len',out.length);
+              const {PureCrypto:PC}=require('@bitwarden/sdk-internal');
+              const pk=PC.decrypt_user_key_with_master_password(j.Key,P,mpu.Salt,{pBKDF2:{iterations:600000}});
+              console.log('SDK DECRYPT topKey OK len',pk.length);
+            }catch(e){console.log('SDK DECRYPT ERR:',e.message||e);}
+          });});
+          req.on('error',e=>console.log('ERR',e.message));req.write(body);req.end();
+          EOF
+          node sdk2.js 2>&1 | head -20
+
