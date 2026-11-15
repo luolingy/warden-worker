@@ -1,0 +1,30 @@
+name: SDK Fmt
+
+on:
+  workflow_dispatch:
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm install --no-save @bitwarden/sdk-internal
+      - name: t
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+          WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
+        run: |
+          cat > f.js <<'EOF'
+          const {PureCrypto}=require('@bitwarden/sdk-internal');
+          const crypto=require('crypto');
+          const P=process.env.WARDEN_MASTER_PASSWORD,E=process.env.WARDEN_EMAIL.toLowerCase();
+          const uk=crypto.randomBytes(64);
+          const s=PureCrypto.encrypt_user_key_with_master_password(Array.from(uk),P,E,{pBKDF2:{iterations:600000}});
+          console.log('STRING:',s);
+          console.log('by dot parts count:',s.split('.').length);
+          console.log('after 2. split by |:',JSON.stringify(s.slice(2).split('|').map((x,i)=>'part'+i+' len='+x.length)));
+          EOF
+          node f.js 2>&1 | head -10
+
