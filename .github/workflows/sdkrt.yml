@@ -1,0 +1,38 @@
+name: SDK Roundtrip
+
+on:
+  workflow_dispatch:
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --no-save @bitwarden/sdk-internal
+      - name: t
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+          WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
+        run: |
+          cat > rt.js <<'EOF'
+          const {PureCrypto}=require('@bitwarden/sdk-internal');
+          const E=process.env.WARDEN_EMAIL.toLowerCase(), P=process.env.WARDEN_MASTER_PASSWORD;
+          const kdf={pBKDF2:{iterations:600000}};
+          try{
+            const km=PureCrypto.derive_kdf_material(Buffer.from(P),Buffer.from(E),kdf);
+            console.log('derive_kdf_material len',km.length);
+          }catch(e){console.log('derive ERR',e.message||e);}
+          // make a 64-byte user key, encrypt with SDK, decrypt back
+          const uk=require('crypto').randomBytes(64);
+          try{
+            const enc=PureCrypto.encrypt_user_key_with_master_password(Array.from(uk),P,E,kdf);
+            console.log('enc type:',typeof enc, 'isString', typeof enc==='string', 'val', typeof enc==='string'?enc.slice(0,20):JSON.stringify(enc).slice(0,60));
+            const dec=PureCrypto.decrypt_user_key_with_master_password(typeof enc==='string'?enc:String(enc),P,E,kdf);
+            console.log('roundtrip dec len',dec.length,'match',Buffer.from(dec).equals(uk));
+          }catch(e){console.log('roundtrip ERR',e.message||e);}
+          EOF
+          node rt.js 2>&1 | head -20
+
