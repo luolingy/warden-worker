@@ -1,0 +1,26 @@
+name: bw CLI Login Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bwtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install bw CLI
+        run: npm install -g @bitwarden/cli
+      - name: Configure and login
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+          WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
+        run: |
+          bw config server https://warden-worker.tianhesl.workers.dev
+          bw config server
+          echo "--- attempting login ---"
+          bw login "$WARDEN_EMAIL" "$WARDEN_MASTER_PASSWORD" --raw 2>&1 | head -c 300 || true
+          echo ""
+          echo "--- exit: $? ---"
+          echo "--- status ---"
+          BW_SESSION="$(bw unlock "$WARDEN_MASTER_PASSWORD" --raw 2>&1)" || true
+          echo "unlock result length: ${#BW_SESSION}"
+          bw status || true
