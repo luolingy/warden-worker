@@ -1,0 +1,48 @@
+name: SDK T3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --no-save @bitwarden/sdk-internal
+      - name: t
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+          WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
+          BASE_URL: https://warden-worker.tianhesl.workers.dev
+        run: |
+          cat > t3.js <<'EOF'
+          const crypto=require('crypto'),https=require('https'),qs=require('querystring');
+          const B=process.env.BASE_URL,E=process.env.WARDEN_EMAIL,P=process.env.WARDEN_MASTER_PASSWORD;
+          const mKey=crypto.pbkdf2Sync(Buffer.from(P),Buffer.from(E.toLowerCase()),600000,32,'sha256');
+          const mph=crypto.pbkdf2Sync(mKey,Buffer.from(P),1,32,'sha256').toString('base64');
+          const body=qs.stringify({grant_type:'password',username:E,password:mph,scope:'api offline_access',client_id:'web',deviceType:'10',deviceIdentifier:'d-'+crypto.randomUUID()});
+          const u=new URL(B+'/identity/connect/token');
+          const req=https.request({hostname:u.hostname,path:u.pathname,method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Content-Length':Buffer.byteLength(body)}},res=>{let d='';res.on('data',c=>d+=c);res.on('end',()=>{
+            const j=JSON.parse(d);const mpu=j.UserDecryptionOptions.MasterPasswordUnlock;
+            const es=mpu.MasterKeyWrappedUserKey;
+            // manual decrypt to measure length
+            function hkdf(prk,info,len){let t=Buffer.alloc(0),okm=Buffer.alloc(0);const n=Math.ceil(len/32);for(let i=1;i<=n;i++){t=crypto.createHmac('sha256',prk).update(Buffer.concat([t,Buffer.from(info),Buffer.from([i])])).digest();okm=Buffer.concat([okm,t]);}return okm.slice(0,len);}
+            const enc=hkdf(mKey,'enc',32),mac=hkdf(mKey,'mac',32);
+            const parts=es.split('.');const [dataB64,macB64]=parts[1].split('|');
+            const data=Buffer.from(dataB64,'base64'),macv=Buffer.from(macB64,'base64');
+            const iv=data.subarray(0,16),ct=data.subarray(16);
+            const expMac=crypto.createHmac('sha256',mac).update(Buffer.concat([iv,ct])).digest();
+            console.log('MAC match:',crypto.timingSafeEqual(macv,expMac));
+            const dec=crypto.createDecipheriv('aes-256-cbc',enc,iv);const pt=Buffer.concat([dec.update(ct),dec.final()]);
+            console.log('MANUAL decrypted length:',pt.length);
+            const {PureCrypto}=require('@bitwarden/sdk-internal');
+            try{const out=PureCrypto.decrypt_user_key_with_master_password(es,P,mpu.Salt,{pBKDF2:{iterations:600000}});console.log('SDK OK len',out.length);}catch(e){console.log('SDK ERR:',e.message||e);}
+            try{const out2=PureCrypto.decrypt_user_key_with_master_password(j.Key,P,mpu.Salt,{pBKDF2:{iterations:600000}});console.log('SDK topKey OK len',out2.length);}catch(e){console.log('SDK topKey ERR:',e.message||e);}
+          });});
+          req.on('error',e=>console.log('ERR',e.message));req.write(body);req.end();
+          EOF
+          node t3.js 2>&1 | head -20
+
