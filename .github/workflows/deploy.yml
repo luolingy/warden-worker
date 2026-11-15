@@ -45,19 +45,20 @@ jobs:
           fi
 
       - name: Install Wrangler CLI
-        run: npm install --no-save wrangler@3
+        run: npm install --no-save wrangler@4
 
       - name: Apply D1 full schema
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          npx wrangler@3 d1 execute warden-db --remote --file=sql/schema_full.sql --yes
-          npx wrangler@3 d1 execute warden-db --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
+          npx wrangler@4 d1 execute warden-db --remote --file=sql/schema_full.sql --yes
+          npx wrangler@4 d1 execute warden-db --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
           command: deploy
