@@ -61,7 +61,11 @@ const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
   privateKeyEncoding: { type: 'pkcs8', format: 'der' },
 });
 const publicKeyB64 = b64(publicKey);
-const encryptedPrivateKey = encryptType2(encKey, macKey, privateKey);
+// Private key must be encrypted with the USER SYMMETRIC KEY (its enc/mac halves),
+// not the master-stretched key. Client decrypts it using the unwrapped userSymKey.
+const userEncKey = userSymKey.subarray(0, 32);
+const userMacKey = userSymKey.subarray(32, 64);
+const encryptedPrivateKey = encryptType2(userEncKey, userMacKey, privateKey);
 
 const payload = {
   name: null,
