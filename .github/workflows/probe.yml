@@ -1,0 +1,24 @@
+name: Probe Endpoints
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        env:
+          WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
+        run: |
+          B=https://warden-worker.tianhesl.workers.dev
+          echo "== GET /api/config =="; curl -s -o /dev/null -w "%{http_code}\n" $B/api/config
+          echo "== POST /identity/accounts/prelogin =="; curl -s -w "\n%{http_code}\n" -X POST -H 'Content-Type: application/json' -d "{\"email\":\"$WARDEN_EMAIL\"}" $B/identity/accounts/prelogin
+          echo "== POST /api/accounts/prelogin =="; curl -s -w "\n%{http_code}\n" -X POST -H 'Content-Type: application/json' -d "{\"email\":\"$WARDEN_EMAIL\"}" $B/api/accounts/prelogin
+          echo "== POST /accounts/prelogin =="; curl -s -w "\n%{http_code}\n" -X POST -H 'Content-Type: application/json' -d "{\"email\":\"$WARDEN_EMAIL\"}" $B/accounts/prelogin
+          echo "== POST /identity/accounts/login =="; curl -s -w "\n%{http_code}\n" -X POST -H 'Content-Type: application/json' -d "{}" $B/identity/accounts/login
+          echo "== POST /identity/connect/token (empty) =="; curl -s -o /dev/null -w "%{http_code}\n" -X POST $B/identity/connect/token
+          echo "== bw debug login =="
+          npm install -g @bitwarden/cli >/dev/null 2>&1
+          bw config server $B >/dev/null 2>&1
+          BW_LOGLEVEL=debug bw login "$WARDEN_EMAIL" "wrongpwtest" 2>&1 | grep -iE "http|request|url|POST|GET|login|404|error" | head -30 || true
