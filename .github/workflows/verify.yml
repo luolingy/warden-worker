@@ -11,7 +11,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Verify login
+      - name: Install SDK
+        run: npm install --no-save @bitwarden/sdk-internal
+      - name: Verify login + SDK unwrap
         env:
           WARDEN_EMAIL: ${{ secrets.WARDEN_EMAIL }}
           WARDEN_MASTER_PASSWORD: ${{ secrets.WARDEN_MASTER_PASSWORD }}
