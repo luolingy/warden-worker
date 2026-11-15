@@ -34,10 +34,12 @@ const req = https.request(
     res.on('end', () => {
       console.log('LOGIN STATUS', res.statusCode);
       console.log(d.slice(0, 800));
-      if (res.statusCode !== 200) process.exit(2);
+      if (res.statusCode !== 200) { console.log('::error::login status ' + res.statusCode); process.exit(2); }
       const j = JSON.parse(d);
+      const ok = !!j.access_token && !!j.Key && !!j.PrivateKey;
       console.log('Got token?', !!j.access_token, 'Key len', (j.Key || '').length, 'PrivateKey len', (j.PrivateKey || '').length);
-      process.exit(0);
+      console.log(ok ? '::notice::LOGIN OK token+Key+PrivateKey present' : '::error::LOGIN incomplete');
+      process.exit(ok ? 0 : 4);
     });
   }
 );
