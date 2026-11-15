@@ -1,4 +1,4 @@
-// Register a Bitwarden-compatible account on the Warden worker.
+// Register a Bitwarden-compatible account on the Warden worker (encType 2 = AesCbc256_HmacSha256).
 // Reads BASE_URL, WARDEN_EMAIL, WARDEN_MASTER_PASSWORD from env.
 const crypto = require('crypto');
 const https = require('https');
@@ -20,13 +20,6 @@ function pbkdf2(password, salt, iterations, keylenBytes) {
   return crypto.pbkdf2Sync(Buffer.from(password), Buffer.from(salt), iterations, keylenBytes, 'sha256');
 }
 
-function encryptToB64(encKey, plaintext) {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
-  const ct = Buffer.concat([cipher.update(Buffer.from(plaintext)), cipher.final()]);
-  return b64(Buffer.concat([iv, ct]));
-}
-
 // HKDF-Expand (RFC 5869), SHA-256
 function hkdfExpand(prk, info, length) {
   const hashLen = 32;
@@ -40,20 +33,35 @@ function hkdfExpand(prk, info, length) {
   return okm.slice(0, length);
 }
 
+// Bitwarden EncString, encType 2 (AesCbc256_HmacSha256_B64): "2.<b64(iv|ct)>|<b64(mac)>"
+function encryptType2(encKey, macKey, plaintext) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
+  const ct = Buffer.concat([cipher.update(Buffer.from(plaintext)), cipher.final()]);
+  const mac = crypto.createHmac('sha256', macKey).update(Buffer.concat([iv, ct])).digest();
+  return '2.' + b64(Buffer.concat([iv, ct])) + '|' + b64(mac);
+}
+
+// Master key + auth hash
 const masterKey = pbkdf2(PASSWORD, emailLower, KDF_ITERATIONS, 32);
 const masterPasswordHash = b64(pbkdf2(masterKey, PASSWORD, 1, 32));
 
+// Stretch master key -> encKey/macKey (32+32) via HKDF-Expand
 const encKey = hkdfExpand(masterKey, 'enc', 32);
 const macKey = hkdfExpand(masterKey, 'mac', 32);
 
+// User symmetric key = 64 random bytes (enc+mac)
 const userSymKey = crypto.randomBytes(64);
-const protectedUserSymKey = encryptToB64(encKey, userSymKey);
+const protectedUserSymKey = encryptType2(encKey, macKey, userSymKey);
 
+// RSA 2048 keypair; encrypt private key as encType 2
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
   modulusLength: 2048,
   publicKeyEncoding: { type: 'spki', format: 'der' },
   privateKeyEncoding: { type: 'pkcs8', format: 'der' },
 });
+const publicKeyB64 = b64(publicKey);
+const encryptedPrivateKey = encryptType2(encKey, macKey, privateKey);
 
 const payload = {
   name: null,
@@ -61,7 +69,7 @@ const payload = {
   masterPasswordHash,
   masterPasswordHint: null,
   userSymmetricKey: protectedUserSymKey,
-  userAsymmetricKeys: { publicKey: b64(publicKey), encryptedPrivateKey: encryptToB64(encKey, privateKey) },
+  userAsymmetricKeys: { publicKey: publicKeyB64, encryptedPrivateKey },
   kdf: 0,
   kdfIterations: KDF_ITERATIONS,
 };
@@ -69,6 +77,8 @@ const payload = {
 const body = JSON.stringify(payload);
 const url = BASE_URL.replace(/\/$/, '') + '/identity/accounts/register/finish';
 console.log('POST', url);
+console.log('userSymmetricKey prefix:', protectedUserSymKey.slice(0, 4));
+console.log('encryptedPrivateKey prefix:', encryptedPrivateKey.slice(0, 4));
 
 const u = new URL(url);
 const req = https.request(
